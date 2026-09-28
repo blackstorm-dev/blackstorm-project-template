@@ -2,10 +2,6 @@ name: CI
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths-ignore:
-      - README.md
-      - 'docs/**'
   push:
     branches: [main, master]
     paths-ignore:
@@ -25,6 +21,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          tool_versions: |
+            uv 0.11.16
+          cache: false
+      - name: Validate template secret policy
+        run: uv run --script scripts/check-template-secrets.py --all
       - run: |
           docker run --rm -v "$GITHUB_WORKSPACE:/app:ro" -w /app python:3.13-alpine \
             sh -ec 'pip install --no-cache-dir -r requirements.txt && python -m unittest discover -s tests -v'
@@ -33,11 +36,14 @@ jobs:
           version: v1.36.3
       - name: Validate environment manifests
         run: |
+          find deploy -type f -name '*.example' -print0 | while IFS= read -r -d '' file; do
+            test -f "${file%.example}" || cp "$file" "${file%.example}"
+          done
           kubectl kustomize deploy/staging > /dev/null
           kubectl kustomize deploy/production > /dev/null
 
   image:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' && github.repository != 'blackstorm-dev/blackstorm-project-template'
     needs: test
     permissions:
       contents: write

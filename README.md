@@ -1,16 +1,15 @@
-# Blackstorm project template · piloto
+# Blackstorm project template
 
 App HTTP mínima con CI, configuración por entorno y promociones con Kargo y ArgoCD.
 El repo base es `blackstorm-dev/blackstorm-project-template`; los proyectos se crean desde este template.
 Los manifiestos fuente viven en `deploy/base`, `deploy/staging` y `deploy/production`.
 
-## Runner propio: primer hito
+## Runner de CI
 
 La plataforma eligió Actions con runners propios. `runner-check.yaml` permite comprobar manualmente
 checkout y shell en el scale set `blackstorm-local`; requiere que infra haya conectado ARC a la
-organización. [Procedimiento de plataforma](https://github.com/blackstorm-dev/blackstorm-infra/blob/main/docs/architecture/05-github-actions-runners.md).
-El enlace estará disponible al publicar esos cambios de infra. El workflow de prueba también debe
-estar publicado en `main` antes de poder ejecutarlo:
+organización. [Procedimiento de plataforma](https://github.com/blackstorm-dev/blackstorm-template/blob/main/docs/architecture/05-github-actions-runners.md).
+El workflow debe estar publicado en `main` antes de ejecutarlo:
 
 ```bash
 gh workflow run runner-check.yaml --ref main
@@ -20,10 +19,11 @@ gh run watch <run-id> --exit-status
 
 Este chequeo no usa Docker Hub ni despliega la app. `ci.yaml` usa `blackstorm-local` y requiere
 Docker habilitado en el runner por la plataforma.
-`blackstorm-local` depende de la Mac de desarrollo y no es todavía un runner de producción.
+Configurá el label del runner en los workflows según el entorno de tu plataforma.
 
 ## Requisitos
 
+- [uv](https://docs.astral.sh/uv/) para el validador de ejemplos del hook.
 - Git y GitHub CLI (`gh`), autenticado con `gh auth login` y permisos para administrar el repo.
 - Una cuenta Docker Hub, un namespace donde pueda publicar y un token con Read & Write.
 - SOPS y age instalados (`brew install sops age` en macOS).
@@ -31,11 +31,11 @@ Docker habilitado en el runner por la plataforma.
 
 ## Crear un proyecto desde el template
 
-Sustituir `mi-app` por el nombre del proyecto. Usar entre 2 y 255 caracteres: minúsculas, números,
-guiones o guiones bajos, para que también sea válido como nombre de repositorio en Docker Hub.
+Sustituir `mi-app` por el nombre del proyecto. Usar entre 1 y 50 caracteres: comenzar con una letra minúscula, seguir con minúsculas, números
+o guiones y no terminar con un guion, según el contrato de la plataforma.
 
 ```bash
-gh repo create blackstorm-dev/mi-app --private --template blackstorm-dev/blackstorm-project-template --clone
+gh repo create YOUR_ORG/mi-app --private --template blackstorm-dev/blackstorm-project-template --clone
 cd mi-app
 ```
 
@@ -51,7 +51,7 @@ a los destinatarios de esas reglas en `.sops.yaml`, antes de cifrar. No comparta
 
 ## Configurar la publicación una vez por repo
 
-Hacer esto en **el repo del proyecto nuevo**, por ejemplo `blackstorm-dev/mi-app`.
+Hacer esto en **el repo del proyecto nuevo**, por ejemplo `YOUR_ORG/mi-app`.
 Los secrets no se copian al crear un repo desde el template. La imagen de ese proyecto será
 `<namespace>/mi-app`; el nombre lo toma el workflow del repo de GitHub.
 
@@ -97,8 +97,7 @@ Los secrets no se copian al crear un repo desde el template. La imagen de ese pr
 
    Usá tu namespace también en `deploy/platform.yaml` y `deploy/base/deployment.yaml`.
 6. Revisar y commitear `.sops.yaml` y `secrets/dockerhub.env`. Nunca agregar `age.key`.
-   En proyectos creados desde el template, reemplazar las credenciales heredadas por las propias
-   antes de publicar; la clave nueva no descifra archivos cifrados para el proyecto original.
+   El template contiene ejemplos con placeholders; completalos con las credenciales de tu proyecto.
 
 Actions recibe únicamente `SOPS_AGE_KEY` de GitHub. SOPS descifra `secrets/dockerhub.env` para
 el comando de login; el token se enmascara en los logs y Docker cierra la sesión al finalizar.
@@ -114,9 +113,10 @@ imágenes privadas se configura por separado mediante el operador SOPS.
 ## Ejecutar y verificar la CI
 
 En GitHub, abrir **Actions → CI → Run workflow**, elegir `main` y pulsar **Run workflow**.
-Abrir la ejecución: `test` e `image` deben terminar en verde. Si el job queda **Queued** esperando
-`blackstorm-local`, el runner de la plataforma debe estar disponible para ese repo y la Mac
-que aloja el cluster local debe estar encendida.
+La ejecución manual corre `test`; `image` queda omitido. No publica imágenes ni tags.
+Abrir o actualizar una pull request no ejecuta workflows. Un push a `main` o `master`
+que pase los filtros del workflow corre tests y publicación. Si el job queda **Queued** esperando
+`blackstorm-local`, el runner de la plataforma debe estar disponible para ese repo y el cluster que aloja ese runner debe estar disponible.
 
 También se puede ejecutar desde el checkout del proyecto:
 
@@ -178,3 +178,15 @@ Un rollback no recupera datos de la base ni reactiva credenciales revocadas.
 La app lee `MESSAGE` desde el ConfigMap definido en `deploy/base/kustomization.yaml`; `/` muestra
 ese mensaje y `/healthz` sigue respondiendo `ok`. Kustomize cambia el nombre del ConfigMap cuando
 cambia su contenido, lo que actualiza el Deployment y provoca el rollout.
+
+## Secret checks
+
+The official `blackstorm-dev/blackstorm-template` and `blackstorm-dev/blackstorm-project-template`
+repositories accept only secret examples and resource lists in their secrets directories. The
+pre-commit hook identifies the repository through `origin`; CI uses `github.repository`.
+Your own repository can commit SOPS-encrypted secrets as usual. Examples must retain their setup
+header and placeholder values. `make init` installs the local hook; CI checks run on push or manually.
+
+## License
+
+[MIT](LICENSE).

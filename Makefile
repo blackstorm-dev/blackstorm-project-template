@@ -4,6 +4,7 @@ export SOPS_AGE_KEY_FILE := $(CURDIR)/age.key
 
 # Ejecutar desde el clon del proyecto: gh usa su repositorio, no el del template.
 init:
+	@command -v uv >/dev/null || { echo "Instalá uv antes de make init"; exit 1; }
 	git config core.hooksPath .githooks
 	@gh auth status >/dev/null 2>&1 || { echo "Primero ejecutá gh auth login"; exit 1; }
 	bash scripts/init-sops

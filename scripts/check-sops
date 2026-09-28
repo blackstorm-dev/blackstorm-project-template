@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
+uv run --script scripts/check-template-secrets.py
 export SOPS_AGE_KEY_FILE="$PWD/age.key"
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
