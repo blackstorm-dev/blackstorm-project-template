@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: blackstorm-local
+    runs-on: ${{ github.repository == 'blackstorm-dev/blackstorm-project-template' && 'ubuntu-latest' || 'blackstorm-local' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
@@ -47,7 +47,7 @@ jobs:
     needs: test
     permissions:
       contents: write
-    runs-on: blackstorm-local
+    runs-on: ${{ github.repository == 'blackstorm-dev/blackstorm-project-template' && 'ubuntu-latest' || 'blackstorm-local' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

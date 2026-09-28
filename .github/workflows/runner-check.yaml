@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   runner:
-    runs-on: blackstorm-local
+    runs-on: ${{ github.repository == 'blackstorm-dev/blackstorm-project-template' && 'ubuntu-latest' || 'blackstorm-local' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
@@ -18,4 +18,4 @@ jobs:
           test -d .git
           test "$(id -u)" -ne 0
           test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token
-          printf 'Runner propio operativo; checkout disponible, sin token de Kubernetes.\n' >> "$GITHUB_STEP_SUMMARY"
+          printf 'Runner operativo; checkout disponible, sin token de Kubernetes.\n' >> "$GITHUB_STEP_SUMMARY"

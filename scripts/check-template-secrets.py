@@ -109,7 +109,7 @@ def validate(path, text, official):
         if PurePosixPath(path).name == 'kustomization.yaml':
             document = yaml.safe_load(text)
             if (isinstance(document, dict) and document.get('kind') == 'Kustomization'
-                    and set(document) <= {'apiVersion', 'kind', 'resources'}):
+                    and set(document) <= {'apiVersion', 'kind', 'namespace', 'resources'}):
                 return None
         return 'official templates allow only .example secrets and resource-only kustomization.yaml files'
     return None
