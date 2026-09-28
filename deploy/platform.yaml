@@ -1,0 +1,12 @@
+releaseFormat: commit-sha
+images:
+- repository: docker.io/example-user/project-template
+  name: example-user/project-template
+environments:
+  staging:
+    path: deploy/staging
+    promotion: automatic
+  production:
+    path: deploy/production
+    promotion: manual
+    from: staging

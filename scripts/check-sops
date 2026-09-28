@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+export SOPS_AGE_KEY_FILE="$PWD/age.key"
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+failed=0
+while IFS= read -r -d '' file; do
+  case "$file" in
+    *.example|secrets/example/*|*/kustomization.yaml|secrets/README.md) continue ;;
+    secrets/*|live/*/secrets/*|deploy/*/secrets/*) ;;
+    *) continue ;;
+  esac
+  case "$file" in
+    *.env) format=dotenv ;;
+    *.yaml|*.yml) format=yaml ;;
+    *.json) format=json ;;
+    *) format=binary ;;
+  esac
+  git show ":$file" > "$tmp"
+  if ! sops decrypt --input-type "$format" --output-type "$format" "$tmp" >/dev/null 2>&1; then
+    printf 'SOPS: %s no es un archivo cifrado válido o falta su clave age.key. No se permite el commit.\n' "$file" >&2
+    failed=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+exit "$failed"

@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - README.md
+      - 'docs/**'
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - README.md
+      - 'docs/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: blackstorm-local
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/app:ro" -w /app python:3.13-alpine \
+            sh -ec 'pip install --no-cache-dir -r requirements.txt && python -m unittest discover -s tests -v'
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+        with:
+          version: v1.36.3
+      - name: Validate environment manifests
+        run: |
+          kubectl kustomize deploy/staging > /dev/null
+          kubectl kustomize deploy/production > /dev/null
+
+  image:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    permissions:
+      contents: write
+    runs-on: blackstorm-local
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Select image for this release
+        id: release
+        shell: bash
+        run: |
+          previous=$(git tag --list 'ci-*' --sort=-refname | sed -n '/^ci-[0-9]\{10\}-[0-9]\{3\}-[a-f0-9]\{40\}$/ { p; q; }')
+          build=true
+          image_tag="$GITHUB_SHA"
+          if [ -n "$previous" ]; then
+            git merge-base --is-ancestor "$previous^{commit}" HEAD || {
+              echo "This commit precedes the latest validated release; use Kargo for rollback."
+              exit 1
+            }
+            if git diff --quiet "$previous^{commit}" HEAD -- . ':(exclude)deploy/**' ':(exclude)README.md' ':(exclude)docs/**'; then
+              build=false
+              image_tag="${previous##*-}"
+            fi
+          fi
+          printf 'build=%s\nimage_tag=%s\n' "$build" "$image_tag" >> "$GITHUB_OUTPUT"
+      - name: Verify Docker Hub configuration
+        env:
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+        run: |
+          test -n "$DOCKERHUB_NAMESPACE" || { echo "Missing DOCKERHUB_NAMESPACE variable"; exit 1; }
+          test -f secrets/dockerhub.env || { echo "Missing secrets/dockerhub.env: create it with SOPS and commit the encrypted file"; exit 1; }
+      - name: Install SOPS
+        uses: nhedger/setup-sops@187c90dbb4e28c3225263886266a5b92baa7e5a1 # v2
+        with:
+          version: 3.13.3
+      - name: Log in to Docker Hub with SOPS
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          test -n "$SOPS_AGE_KEY" || { echo "Missing SOPS_AGE_KEY: run make init"; exit 1; }
+          sops exec-env secrets/dockerhub.env '
+            set -eu
+            test -n "${DOCKERHUB_USERNAME:-}" || { echo "Missing DOCKERHUB_USERNAME in secrets/dockerhub.env"; exit 1; }
+            test -n "${DOCKERHUB_TOKEN:-}" || { echo "Missing DOCKERHUB_TOKEN in secrets/dockerhub.env"; exit 1; }
+            printf "::add-mask::%s\n" "$DOCKERHUB_TOKEN"
+            printf "%s" "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+          '
+      - uses: docker/setup-qemu-action@v3
+        if: steps.release.outputs.build == 'true'
+      - uses: docker/setup-buildx-action@v3
+      - name: Build candidate image
+        if: steps.release.outputs.build == 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ vars.DOCKERHUB_NAMESPACE }}/${{ github.event.repository.name }}:candidate-${{ github.sha }}
+      - name: Resolve release digest
+        id: digest
+        env:
+          IMAGE_NAME: ${{ vars.DOCKERHUB_NAMESPACE }}/${{ github.event.repository.name }}
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="$BUILD_DIGEST"
+          if [ -z "$digest" ]; then
+            digest=$(docker buildx imagetools inspect "$IMAGE_NAME:$IMAGE_TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          fi
+          echo "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+          printf 'value=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Verify published image
+        env:
+          IMAGE_NAME: ${{ vars.DOCKERHUB_NAMESPACE }}/${{ github.event.repository.name }}
+          DIGEST: ${{ steps.digest.outputs.value }}
+        run: |
+          image_ref="$IMAGE_NAME@$DIGEST"
+          docker pull "$image_ref"
+          container_id=$(docker run -d -p 127.0.0.1::8080 "$image_ref")
+          trap 'docker rm -f "$container_id" >/dev/null' EXIT
+          address=$(docker port "$container_id" 8080/tcp)
+          for attempt in $(seq 1 30); do
+            if response=$(curl --fail --silent "http://$address/healthz") && [ "$response" = "ok" ]; then
+              echo "Published image health check passed: $image_ref"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          echo "Published image failed its health check"
+          exit 1
+      - name: Publish validated image tag
+        if: steps.release.outputs.build == 'true'
+        env:
+          IMAGE_NAME: ${{ vars.DOCKERHUB_NAMESPACE }}/${{ github.event.repository.name }}
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          DIGEST: ${{ steps.digest.outputs.value }}
+        run: docker buildx imagetools create --tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME@$DIGEST"
+      - name: Publish validated configuration tag
+        env:
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+        run: |
+          tag=$(printf 'ci-%010d-%03d-%s' "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT" "$IMAGE_TAG")
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$tag" "$GITHUB_SHA" -m "Validated configuration $GITHUB_SHA with image $IMAGE_TAG"
+          git push origin "refs/tags/$tag"
+      - name: Record immutable image reference
+        env:
+          IMAGE_NAME: ${{ vars.DOCKERHUB_NAMESPACE }}/${{ github.event.repository.name }}
+          DIGEST: ${{ steps.digest.outputs.value }}
+        run: |
+          printf 'Image: %s@%s\n' "$IMAGE_NAME" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Log out of Docker Hub
+        if: always()
+        run: docker logout

@@ -1,0 +1,11 @@
+.git
+.github
+tests
+__pycache__
+*.py[cod]
+age.key
+.sops.yaml
+secrets
+deploy
+docs
+README.md

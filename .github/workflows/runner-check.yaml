@@ -1,0 +1,21 @@
+name: Runner check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runner:
+    runs-on: blackstorm-local
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify runner and checkout
+        run: |
+          uname -sm
+          test -d .git
+          test "$(id -u)" -ne 0
+          test ! -f /var/run/secrets/kubernetes.io/serviceaccount/token
+          printf 'Runner propio operativo; checkout disponible, sin token de Kubernetes.\n' >> "$GITHUB_STEP_SUMMARY"

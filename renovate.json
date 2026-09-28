@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "automerge": false,
+  "ignorePaths": [
+    "**/charts/**",
+    "**/secrets/**"
+  ],
+  "packageRules": [
+    {
+      "description": "Las imágenes desplegadas las promueve Kargo",
+      "matchManagers": [
+        "kustomize"
+      ],
+      "matchDatasources": [
+        "docker"
+      ],
+      "enabled": false,
+      "matchDepTypes": [
+        "Kustomization",
+        "Component"
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.*\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "\\bpython:(?<currentValue>[0-9.]+-alpine)\\s"
+      ],
+      "depNameTemplate": "python",
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.*\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "uses: nhedger/setup-sops@[^\\n]+\\s+with:\\s+version: (?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "getsops/sops",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}

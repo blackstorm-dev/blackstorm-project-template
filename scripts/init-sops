@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+if [ ! -f age.key ]; then
+  age-keygen -o age.key
+fi
+if grep -q 'REPLACE_WITH_AGE_PUBLIC_KEY' .sops.yaml; then
+  recipient=$(age-keygen -y age.key)
+  tmp=$(mktemp)
+  trap 'rm -f "$tmp"' EXIT
+  awk -v recipient="$recipient" '{gsub(/REPLACE_WITH_AGE_PUBLIC_KEY/, recipient); print}' .sops.yaml > "$tmp"
+  cat "$tmp" > .sops.yaml
+fi
